@@ -1,7 +1,7 @@
 import re
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Exam, Question, Choice, ExamAttempt, Answer
+from .models import Exam, Question, Choice, ExamAttempt, Answer
 
 # ---------- QUESTIONS ----------
 
@@ -74,22 +74,47 @@ class ExamSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exam
         fields = ['id', 'title', 'description', 'duration_minutes', 'access_code',
-                  'is_published', 'allow_multiple_attempts', 'shuffle_questions',
+                  'is_published', 'results_published', 'start_at', 'end_at',
+                  'allow_multiple_attempts', 'shuffle_questions',
                   'created_by', 'created_by_name', 'total_marks', 'questions', 'created_at']
         read_only_fields = ['created_by', 'access_code']
+
+    def validate(self, attrs):
+        start_at = attrs.get('start_at', getattr(self.instance, 'start_at', None))
+        end_at = attrs.get('end_at', getattr(self.instance, 'end_at', None))
+        if start_at and end_at and end_at <= start_at:
+            raise serializers.ValidationError("End time must be after start time.")
+        return attrs
 
 
 class ExamListSerializer(serializers.ModelSerializer):
     total_marks = serializers.ReadOnlyField()
     question_count = serializers.SerializerMethodField()
+    attempt_status = serializers.SerializerMethodField()
+    attempted = serializers.SerializerMethodField()
 
     class Meta:
         model = Exam
         fields = ['id', 'title', 'description', 'duration_minutes', 'access_code',
-                  'is_published', 'total_marks', 'question_count', 'created_at']
+                  'is_published', 'results_published', 'start_at', 'end_at',
+                  'total_marks', 'question_count', 'attempt_status', 'attempted', 'created_at']
 
     def get_question_count(self, obj):
         return obj.questions.count()
+
+    def get_attempt_status(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or request.user.role != 'student':
+            return None
+        attempt = obj.attempts.filter(student=request.user).order_by('-started_at').first()
+        if not attempt:
+            return 'not_started'
+        if attempt.submitted_at:
+            return 'submitted'
+        return 'in_progress'
+
+    def get_attempted(self, obj):
+        return self.get_attempt_status(obj) in ('submitted', 'in_progress')
 
 
 class ExamStudentSerializer(serializers.ModelSerializer):
@@ -98,7 +123,8 @@ class ExamStudentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Exam
-        fields = ['id', 'title', 'description', 'duration_minutes', 'total_marks', 'questions']
+        fields = ['id', 'title', 'description', 'duration_minutes', 'total_marks',
+                  'start_at', 'end_at', 'results_published', 'questions']
 
 
 # ---------- ATTEMPT / ANSWERS ----------
@@ -107,6 +133,15 @@ class AnswerSubmitSerializer(serializers.Serializer):
     question_id = serializers.IntegerField()
     selected_choice_id = serializers.IntegerField(required=False, allow_null=True)
     text_answer = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        selected_choice_id = attrs.get('selected_choice_id')
+        if selected_choice_id and not Choice.objects.filter(
+            id=selected_choice_id,
+            question_id=attrs['question_id'],
+        ).exists():
+            raise serializers.ValidationError("Selected choice does not belong to this question.")
+        return attrs
 
 
 class AnswerResultSerializer(serializers.ModelSerializer):
@@ -137,9 +172,28 @@ class ExamAttemptSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.name', read_only=True)
     roll_no = serializers.CharField(source='student.roll_no', read_only=True)
     exam_title = serializers.CharField(source='exam.title', read_only=True)
+    exam_results_published = serializers.BooleanField(source='exam.results_published', read_only=True)
     answers = AnswerResultSerializer(many=True, read_only=True)
+    visible_total_score = serializers.SerializerMethodField()
+
+    def get_visible_total_score(self, obj):
+        request = self.context.get('request')
+        if request and request.user == obj.exam.created_by:
+            return obj.total_score
+        if obj.exam.results_published:
+            return obj.total_score
+        return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if request and request.user != instance.exam.created_by and not instance.exam.results_published:
+            data['total_score'] = None
+            data['answers'] = []
+        return data
 
     class Meta:
         model = ExamAttempt
         fields = ['id', 'exam', 'exam_title', 'student', 'student_name', 'roll_no',
-                  'started_at', 'submitted_at', 'total_score', 'is_graded', 'answers']
+                  'started_at', 'submitted_at', 'total_score', 'visible_total_score',
+                  'is_graded', 'exam_results_published', 'answers']

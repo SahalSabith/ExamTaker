@@ -5,7 +5,7 @@ from .views import (
 )
 
 from exam.views import (
-    ExamViewSet, PublishExamView,
+    ExamViewSet, PublishExamView, PublishResultsView,
     QuestionListCreateView, QuestionDetailView,
     AvailableExamsView, ExamByCodeView, StartExamView,
     SubmitAnswerView, FinishExamView, MyAttemptsView, AttemptResultView,
@@ -24,6 +24,7 @@ urlpatterns = [
     path('teacher/exams/', exam_list),
     path('teacher/exams/<int:pk>/', exam_detail),
     path('teacher/exams/<int:exam_id>/publish/', PublishExamView.as_view()),
+    path('teacher/exams/<int:exam_id>/publish-results/', PublishResultsView.as_view()),
     path('teacher/exams/<int:exam_id>/questions/', QuestionListCreateView.as_view()),
     path('teacher/questions/<int:question_id>/', QuestionDetailView.as_view()),
     path('teacher/exams/<int:exam_id>/attempts/', ExamAttemptsListView.as_view()),

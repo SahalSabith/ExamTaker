@@ -16,6 +16,10 @@ export const loginUser = createAsyncThunk('auth/loginUser', async (data, { rejec
   catch (err) { return rejectWithValue(err.response?.data); }
 });
 
+export const logoutStudent = createAsyncThunk('auth/logoutStudent', async (_, { dispatch }) => {
+  dispatch(logout());
+});
+
 const storedUser = localStorage.getItem('user');
 
 const authSlice = createSlice({
@@ -27,11 +31,15 @@ const authSlice = createSlice({
     successMessage: null,
   },
   reducers: {
-    logout: (state) => { state.user = null; localStorage.clear(); },
+    logout: (state) => {
+      state.user = null;
+      localStorage.clear();
+    },
     clearError: (state) => { state.error = null; },
     clearSuccessMessage: (state) => { state.successMessage = null; },
   },
   extraReducers: (builder) => {
+    // Login actually authenticates the user, so it saves tokens.
     const saveAuth = (state, action) => {
       state.loading = false;
       state.user = action.payload.user;
@@ -39,13 +47,23 @@ const authSlice = createSlice({
       localStorage.setItem('refresh', action.payload.refresh);
       localStorage.setItem('user', JSON.stringify(action.payload.user));
     };
+
+    // Registration should NOT auto-log-in; just report success and
+    // send the person to /login, per the Signup page's flow.
+    const registerSuccess = (state, action) => {
+      state.loading = false;
+      state.successMessage = action.payload.message || 'Registration successful!';
+    };
+
     builder
-      .addCase(registerTeacher.pending, (s) => { s.loading = true; s.error = null; })
-      .addCase(registerTeacher.fulfilled, saveAuth)
+      .addCase(registerTeacher.pending, (s) => { s.loading = true; s.error = null; s.successMessage = null; })
+      .addCase(registerTeacher.fulfilled, registerSuccess)
       .addCase(registerTeacher.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
-      .addCase(registerStudent.pending, (s) => { s.loading = true; s.error = null; })
-      .addCase(registerStudent.fulfilled, saveAuth)
+
+      .addCase(registerStudent.pending, (s) => { s.loading = true; s.error = null; s.successMessage = null; })
+      .addCase(registerStudent.fulfilled, registerSuccess)
       .addCase(registerStudent.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+
       .addCase(loginUser.pending, (s) => { s.loading = true; s.error = null; })
       .addCase(loginUser.fulfilled, saveAuth)
       .addCase(loginUser.rejected, (s, a) => { s.loading = false; s.error = a.payload; });

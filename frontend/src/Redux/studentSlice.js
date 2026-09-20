@@ -21,10 +21,16 @@ export const finishExam = createAsyncThunk('student/finishExam', async (attemptI
   catch (err) { return rejectWithValue(err.response?.data); }
 });
 
+export const fetchMyAttempts = createAsyncThunk('student/fetchMyAttempts', async (_, { rejectWithValue }) => {
+  try { return (await api.get('/student/attempts/')).data; }
+  catch (err) { return rejectWithValue(err.response?.data); }
+});
+
 const studentSlice = createSlice({
   name: 'student',
   initialState: {
     availableExams: [],
+    attempts: [],
     currentAttempt: null,
     currentExam: null,
     loading: false,
@@ -36,7 +42,9 @@ const studentSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase(fetchAvailableExams.fulfilled, (s, a) => { s.availableExams = a.payload; })
+      .addCase(fetchAvailableExams.pending, (s) => { s.loading = true; s.error = null; })
+      .addCase(fetchAvailableExams.fulfilled, (s, a) => { s.loading = false; s.availableExams = a.payload; })
+      .addCase(fetchAvailableExams.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
       .addCase(startExam.pending, (s) => { s.loading = true; s.error = null; })
       .addCase(startExam.fulfilled, (s, a) => {
         s.loading = false;
@@ -44,7 +52,13 @@ const studentSlice = createSlice({
         s.currentExam = a.payload.exam;
       })
       .addCase(startExam.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
-      .addCase(finishExam.fulfilled, (s, a) => { s.result = a.payload; });
+      .addCase(submitAnswer.rejected, (s, a) => { s.error = a.payload; })
+      .addCase(finishExam.pending, (s) => { s.loading = true; s.error = null; })
+      .addCase(finishExam.fulfilled, (s, a) => { s.loading = false; s.result = a.payload; })
+      .addCase(finishExam.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+      .addCase(fetchMyAttempts.pending, (s) => { s.loading = true; s.error = null; })
+      .addCase(fetchMyAttempts.fulfilled, (s, a) => { s.loading = false; s.attempts = a.payload; })
+      .addCase(fetchMyAttempts.rejected, (s, a) => { s.loading = false; s.error = a.payload; });
   },
 });
 

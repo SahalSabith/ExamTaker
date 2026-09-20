@@ -6,6 +6,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from django.db import models
 
 from .models import Exam, Question, ExamAttempt, Answer
 from account.permissions import IsTeacher, IsStudent
@@ -45,6 +46,21 @@ class PublishExamView(APIView):
         exam.is_published = request.data.get('is_published', True)
         exam.save()
         return Response({"message": "Exam updated", "is_published": exam.is_published})
+
+
+class PublishResultsView(APIView):
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def patch(self, request, exam_id):
+        exam = get_object_or_404(Exam, id=exam_id, created_by=request.user)
+        submitted_attempts = exam.attempts.filter(submitted_at__isnull=False)
+        if not submitted_attempts.exists():
+            return Response({"error": "No submitted attempts yet."}, status=400)
+        if submitted_attempts.filter(is_graded=False).exists():
+            return Response({"error": "Grade all submitted attempts before publishing marks."}, status=400)
+        exam.results_published = request.data.get('results_published', True)
+        exam.save()
+        return Response({"message": "Results updated", "results_published": exam.results_published})
 
 
 # ---------- TEACHER: QUESTIONS ----------
@@ -92,7 +108,10 @@ class AvailableExamsView(generics.ListAPIView):
     serializer_class = ExamListSerializer
 
     def get_queryset(self):
-        return Exam.objects.filter(is_published=True).order_by('-created_at')
+        now = timezone.now()
+        return Exam.objects.filter(is_published=True).filter(
+            models.Q(end_at__isnull=True) | models.Q(end_at__gte=now)
+        ).order_by('-created_at')
 
 
 class ExamByCodeView(APIView):
@@ -109,6 +128,12 @@ class StartExamView(APIView):
     def post(self, request, exam_id):
         exam = get_object_or_404(Exam, id=exam_id, is_published=True)
         student = request.user
+        now = timezone.now()
+
+        if exam.start_at and now < exam.start_at:
+            return Response({"error": "This exam has not started yet."}, status=400)
+        if exam.end_at and now > exam.end_at:
+            return Response({"error": "This exam has ended."}, status=400)
 
         existing = ExamAttempt.objects.filter(exam=exam, student=student).order_by('-started_at').first()
 
@@ -136,7 +161,7 @@ class SubmitAnswerView(APIView):
             return Response({"error": "Exam already submitted."}, status=400)
 
         elapsed_minutes = (timezone.now() - attempt.started_at).total_seconds() / 60
-        if elapsed_minutes > attempt.exam.duration_minutes:
+        if elapsed_minutes > attempt.exam.duration_minutes or (attempt.exam.end_at and timezone.now() > attempt.exam.end_at):
             return Response({"error": "Time is up for this exam."}, status=400)
 
         serializer = AnswerSubmitSerializer(data=request.data)
@@ -199,7 +224,7 @@ class AttemptResultView(APIView):
         attempt = get_object_or_404(ExamAttempt, id=attempt_id)
         if request.user != attempt.student and request.user != attempt.exam.created_by:
             return Response({"error": "Not allowed."}, status=403)
-        return Response(ExamAttemptSerializer(attempt).data)
+        return Response(ExamAttemptSerializer(attempt, context={'request': request}).data)
 
 
 # ---------- TEACHER: GRADING ----------
