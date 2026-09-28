@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = 'django-backend-production-3391.up.railway.app/api';
+const BASE_URL = 'https://django-backend-production-3391.up.railway.app/api';
 
 const api = axios.create({ baseURL: BASE_URL });
 
